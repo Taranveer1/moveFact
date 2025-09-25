@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
+import Image from "next/image";
 import MovieSearch from "@/components/MovieSearch";
 
 /**
@@ -337,10 +338,12 @@ export default function Home() {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 {session.user?.image && (
-                  <img
+                  <Image
                     src={session.user.image}
                     alt="Profile"
-                    className="w-14 h-14 rounded-full ring-2 ring-white/10"
+                    width={56}
+                    height={56}
+                    className="rounded-full ring-2 ring-white/10"
                   />
                 )}
                 <div>
