@@ -1,37 +1,70 @@
+/**
+ * MOVIE SEARCH API ROUTE - /api/search-movies
+ *
+ * This API provides movie search functionality for the MovieSearch component.
+ * It integrates with The Movie Database (TMDB) API for comprehensive movie data
+ * and includes a robust fallback system for offline functionality.
+ *
+ * Features:
+ * - TMDB API integration with poster images
+ * - Fallback movie suggestions when API unavailable
+ * - Query validation and sanitization
+ * - Manual movie entry support
+ * - Error handling with graceful degradation
+ *
+ * Query Parameter: ?q=movie_search_term
+ * Response: { results: Movie[], fallback?: boolean }
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 
+/**
+ * GET HANDLER - Search for movies
+ * Called by MovieSearch component as user types in search input
+ * Provides autocomplete suggestions with movie posters and details
+ */
 export async function GET(request: NextRequest) {
+  // Extract search query from URL parameters
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q");
 
+  // Validate query length (minimum 2 characters for meaningful search)
   if (!query || query.length < 2) {
     return NextResponse.json({ results: [] });
   }
 
-  // If no TMDB API key, return fallback suggestions
+  /**
+   * FALLBACK SYSTEM - When TMDB API is not configured
+   * Returns curated popular movies that match the search query
+   */
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({
       results: getFallbackMovies(query),
-      fallback: true,
+      fallback: true, // Indicates fallback mode to UI
     });
   }
 
   try {
+    /**
+     * TMDB API CALL - Search for movies using external API
+     * Uses TMDB's search endpoint with authentication via Bearer token
+     */
     const response = await fetch(
       `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(
         query
-      )}&page=1&include_adult=false`,
+      )}&page=1&include_adult=false`, // Exclude adult content
       {
         headers: {
-          Authorization: `Bearer ${process.env.TMDB_API_KEY}`,
+          Authorization: `Bearer ${process.env.TMDB_API_KEY}`, // API key authentication
           "Content-Type": "application/json",
         },
       }
     );
 
+    // Handle HTTP errors from TMDB API
     if (!response.ok) {
       console.log(`TMDB API error: ${response.status}`);
-      // Return fallback if API fails
+      // Gracefully fallback to local movie suggestions
       return NextResponse.json({
         results: getFallbackMovies(query),
         fallback: true,
@@ -40,7 +73,7 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
 
-    // If API returns error, use fallback
+    // Handle API-level errors from TMDB
     if (data.status_code || !data.results) {
       console.log("TMDB API returned error:", data);
       return NextResponse.json({
@@ -50,7 +83,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Format the results to include poster URLs
-    const formattedResults = data.results.slice(0, 8).map((movie: any) => ({
+    const formattedResults = data.results.slice(0, 8).map((movie: {
+      id: number;
+      title: string;
+      release_date?: string;
+      poster_path?: string;
+      overview?: string;
+    }) => ({
       id: movie.id,
       title: movie.title,
       year: movie.release_date
@@ -82,7 +121,13 @@ export async function GET(request: NextRequest) {
 }
 
 // Fallback movie suggestions when API is unavailable
-function getFallbackMovies(query: string): any[] {
+function getFallbackMovies(query: string): Array<{
+  id: string;
+  title: string;
+  year: number | null;
+  poster: string | null;
+  overview: string;
+}> {
   const queryLower = query.toLowerCase();
 
   const popularMovies = [
@@ -183,7 +228,7 @@ function getFallbackMovies(query: string): any[] {
       title: query.trim(),
       year: null,
       poster: null,
-      overview: `Add "${query.trim()}" as your favorite movie`,
+      overview: `Add ${query.trim()} as your favorite movie`,
     },
   ];
 }

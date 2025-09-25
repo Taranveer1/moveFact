@@ -4,32 +4,77 @@ import { useEffect, useState } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import MovieSearch from "@/components/MovieSearch";
 
+/**
+ * HOME PAGE COMPONENT - The main dashboard for the Movie Facts app
+ *
+ * This component handles the entire user flow:
+ * 1. Shows login screen for unauthenticated users
+ * 2. Shows movie selection for first-time users
+ * 3. Shows dashboard with movie facts for returning users
+ *
+ * Key Features:
+ * - Google OAuth authentication via NextAuth
+ * - Movie search and selection
+ * - AI-powered movie fact generation
+ * - User profile display with favorite movie
+ */
 export default function Home() {
+  // ========== AUTHENTICATION STATE ==========
+  // Get user session data and loading status from NextAuth
   const { data: session, status } = useSession();
-  const [favoriteMovie, setFavoriteMovie] = useState("");
-  const [userFavoriteMovie, setUserFavoriteMovie] = useState("");
-  const [movieFact, setMovieFact] = useState("");
-  const [lastFact, setLastFact] = useState(""); // Track the previous fact
-  const [isSettingMovie, setIsSettingMovie] = useState(false);
-  const [isLoadingFact, setIsLoadingFact] = useState(false);
-  const [showMovieInput, setShowMovieInput] = useState(false);
-  const [isEditingMovie, setIsEditingMovie] = useState(false);
 
-  // Check if user has a favorite movie and generate fact
+  // ========== COMPONENT STATE ==========
+  // User's selected favorite movie (stored in database)
+  const [userFavoriteMovie, setUserFavoriteMovie] = useState("");
+
+  // Current movie fact being displayed
+  const [movieFact, setMovieFact] = useState("");
+
+  // Previously shown fact (used to avoid duplicates)
+  const [lastFact, setLastFact] = useState("");
+
+  // Loading states for better UX
+  const [isSettingMovie, setIsSettingMovie] = useState(false); // Saving movie to database
+  const [isLoadingFact, setIsLoadingFact] = useState(false);   // Generating new fact
+
+  // UI state management
+  const [showMovieInput, setShowMovieInput] = useState(false); // Show movie search for new users
+  const [isEditingMovie, setIsEditingMovie] = useState(false); // User is changing their movie
+
+  // ========== EFFECT HOOKS - Handle side effects and data loading ==========
+
+  /**
+   * AUTHENTICATION EFFECT
+   * Runs when user authentication status changes
+   * - Once authenticated, fetch the user's data from database
+   */
   useEffect(() => {
     if (status === "authenticated") {
       fetchUserData();
     }
   }, [status]);
 
-  // Generate new fact whenever we have the user's favorite movie
+  /**
+   * MOVIE FACT GENERATION EFFECT
+   * Runs whenever user has a favorite movie and is authenticated
+   * - Automatically generates a new movie fact
+   * - Ensures fresh content on every visit
+   */
   useEffect(() => {
     if (userFavoriteMovie && status === "authenticated") {
-      // Always generate a new fact when we have the movie info
       generateMovieFact();
     }
   }, [userFavoriteMovie, status]);
 
+  // ========== DATA FETCHING FUNCTIONS ==========
+
+  /**
+   * FETCH USER DATA FROM DATABASE
+   * - Calls the /api/user/favorite-movie endpoint
+   * - If user has a favorite movie: sets it in state
+   * - If no favorite movie: shows movie selection UI
+   * - On error: defaults to showing movie selection
+   */
   const fetchUserData = async () => {
     try {
       const response = await fetch("/api/user/favorite-movie");
@@ -38,15 +83,26 @@ export default function Home() {
         if (data.user.favoriteMovie) {
           setUserFavoriteMovie(data.user.favoriteMovie);
         } else {
+          // New user - show movie selection
           setShowMovieInput(true);
         }
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
+      // On error, assume new user and show movie selection
       setShowMovieInput(true);
     }
   };
 
+  /**
+   * SAVE USER'S FAVORITE MOVIE TO DATABASE
+   * - Called when user selects a movie from the search component
+   * - Updates the database via POST to /api/user/favorite-movie
+   * - Updates UI state and triggers fact generation
+   * - Handles loading state and error scenarios
+   *
+   * @param movieTitle - The movie title selected by the user
+   */
   const handleSetFavoriteMovie = async (movieTitle: string) => {
     if (!movieTitle.trim()) return;
 
@@ -59,11 +115,12 @@ export default function Home() {
       });
 
       if (response.ok) {
+        // Update local state
         setUserFavoriteMovie(movieTitle.trim());
-        setShowMovieInput(false);
-        setIsEditingMovie(false);
-        setFavoriteMovie("");
-        // Generate new fact for the new movie
+        setShowMovieInput(false);  // Hide movie selection UI
+        setIsEditingMovie(false);  // Exit edit mode
+
+        // Generate a fact for the new movie (small delay for better UX)
         setTimeout(() => generateMovieFact(), 500);
       }
     } catch (error) {
@@ -73,6 +130,14 @@ export default function Home() {
     }
   };
 
+  /**
+   * GENERATE AI-POWERED MOVIE FACT
+   * - Calls /api/generate-fact with the user's favorite movie
+   * - Uses timestamp to prevent caching and ensure fresh facts
+   * - Excludes the last fact to avoid immediate duplicates
+   * - Handles OpenAI API errors with graceful fallbacks
+   * - Shows loading state during generation
+   */
   const generateMovieFact = async () => {
     setIsLoadingFact(true);
     try {
@@ -83,21 +148,23 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           movie: userFavoriteMovie,
-          requestId: timestamp, // Add unique ID to force new fact generation
-          excludeFact: lastFact, // Exclude the previous fact
+          requestId: timestamp,    // Unique ID for fact generation
+          excludeFact: lastFact,   // Don't repeat the previous fact
         }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        setLastFact(movieFact); // Store the current fact as the last fact
-        setMovieFact(data.fact);
+        setLastFact(movieFact);  // Store current fact as "last fact"
+        setMovieFact(data.fact); // Display the new fact
       } else {
+        // API error - show user-friendly message
         setMovieFact(
           `I couldn't generate a fact about "${userFavoriteMovie}" right now. Try refreshing the page!`
         );
       }
-    } catch (error) {
+    } catch {
+      // Network/other error - show fallback message
       setMovieFact(
         `Having trouble generating facts about "${userFavoriteMovie}". Please refresh the page to try again!`
       );
@@ -106,7 +173,12 @@ export default function Home() {
     }
   };
 
-  // Loading state
+  // ========== RENDER LOGIC - Different UI states based on authentication and data ==========
+
+  /**
+   * LOADING STATE - While NextAuth determines authentication status
+   * Shows a centered spinner while checking if user is logged in
+   */
   if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -118,7 +190,11 @@ export default function Home() {
     );
   }
 
-  // Not authenticated - show login
+  /**
+   * LOGIN SCREEN - User is not authenticated
+   * Shows Google sign-in button with branding
+   * Triggers NextAuth Google OAuth flow when clicked
+   */
   if (!session) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -162,7 +238,11 @@ export default function Home() {
     );
   }
 
-  // Authenticated - show movie input for first-time users
+  /**
+   * MOVIE SELECTION SCREEN - First-time user or changing movie
+   * Shows when authenticated user has no favorite movie set
+   * Uses MovieSearch component for movie selection with autocomplete
+   */
   if (showMovieInput) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -171,7 +251,7 @@ export default function Home() {
             <div className="text-center mb-8">
               <h1 className="text-2xl font-bold text-white mb-3">Welcome!</h1>
               <p className="text-muted">
-                What's your favorite movie? Search and select from our database.
+                What&apos;s your favorite movie? Search and select from our database.
               </p>
             </div>
             <div className="space-y-4">
@@ -192,7 +272,14 @@ export default function Home() {
     );
   }
 
-  // Authenticated with favorite movie - show main dashboard
+  /**
+   * MAIN DASHBOARD - Authenticated user with favorite movie set
+   * Shows:
+   * - User profile (name, email, photo from Google)
+   * - Current favorite movie with option to change
+   * - AI-generated movie fact with refresh capability
+   * - Logout functionality
+   */
   return (
     <div className="min-h-screen p-4">
       <div className="max-w-3xl mx-auto">
